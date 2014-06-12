@@ -5,11 +5,11 @@
 // ==========================================================================
 
 
- // Version: 1.0.0.beta.1
+ // Version: 1.0.0.beta.2
 
 (function() {
 Ember.Validations = Ember.Namespace.create({
-  VERSION: '1.0.0.beta.1'
+  VERSION: '1.0.0.beta.2'
 });
 
 })();
@@ -19,12 +19,16 @@ Ember.Validations = Ember.Namespace.create({
 (function() {
 Ember.Validations.messages = {
   render: function(attribute, context) {
-    var regex = new RegExp("{{(.*?)}}"),
-        attributeName = "";
-    if (regex.test(this.defaults[attribute])) {
-      attributeName = regex.exec(this.defaults[attribute])[1];
+    if (Ember.I18n) {
+      return Ember.I18n.t('errors.' + attribute, context);
+    } else {
+      var regex = new RegExp("{{(.*?)}}"),
+          attributeName = "";
+      if (regex.test(this.defaults[attribute])) {
+        attributeName = regex.exec(this.defaults[attribute])[1];
+      }
+      return this.defaults[attribute].replace(regex, context[attributeName]);
     }
-    return this.defaults[attribute].replace(regex, context[attributeName]);
   },
   defaults: {
     inclusion: "is not included in the list",
@@ -47,7 +51,8 @@ Ember.Validations.messages = {
     lessThanOrEqualTo: "must be less than or equal to {{count}}",
     otherThan: "must be other than {{count}}",
     odd: "must be odd",
-    even: "must be even"
+    even: "must be even",
+    url: "is not a valid URL"
   }
 };
 
@@ -199,86 +204,13 @@ Ember.Validations.validators.Base = Ember.Object.extend({
       unless: this.get('options.unless')
     };
     this.model.addObserver(this.property, this, this._validate);
-    this.abstractOptions();
-  },
-  abstractOptions: function() {
-    var key, keysToSkip = [];
-    for (key in this.conditionals) {
-      keysToSkip.push(key);
-    }
-    if (this.options && typeof(this.options) === 'object') {
-      // For memory/performance reasons, only clone original object if we have functions on the object
-      if (this.hasDynamic(this.options, keysToSkip)) {
-        // Clone the options object, so any transformations don't effect the original options
-        this.options = this.cloneObject(this.options, keysToSkip);
-        this.bindOptions(this.options);
-      }
-    }
-  },
-  hasDynamic: function(options, keysToSkip) {
-    for(var key in options) {
-      if (keysToSkip.contains(key))
-        continue;
-      var option = options[key];
-      // Dynamic option property
-      if (typeof(option) === 'object' && option.constructor === Object) {
-        if (this.hasDynamic(option, keysToSkip)) return true;
-      }
-      else if (typeof(option) === 'function') {
-        return true;
-      }
-    }
-  },
-  cloneObject: function(entity, keysToSkip) {
-    if (typeof(entity) === 'object' && entity.constructor === Object) {
-      var clone = {};
-      for (var key in entity) {
-        if (keysToSkip.contains(key)) continue; // Don't need to clone conditionals
-        if (entity.hasOwnProperty(key)) clone[key] = this.cloneObject(entity[key], keysToSkip);
-      }
-      return clone;
-    }
-    return entity;
-  },
-  bindOptions: function(options) {
-    for(var key in options) {
-      var option = options[key];
-      if (typeof(option) === 'object' && option.constructor === Object) {
-        this.bindOptions(option);
-      }
-      else if (typeof(option) === 'function') {
-        this.bindOption(options, key);
-      }
-    }
-  },
-  bindOption: function(options, key) {
-    var option = options[key];
-    if (delete options[key]) {
-      var me = this;
-      var getter = function() { 
-        return option(me.model); 
-      };
-      if (Object.defineProperty) {
-        Object.defineProperty(options, key, {
-          get: getter,
-          enumerable: true,
-          configurable: true
-        });
-      }
-      else if (Object.prototype.__defineGetter__) {
-        Object.prototype.__defineGetter__.call(options, key, getter);
-      } else {
-        // Revert, getter/setter not supported
-        options[key] = option;
-      }
-    }
   },
   addObserversForDependentValidationKeys: function() {
     this._dependentValidationKeys.forEach(function(key) {
       this.model.addObserver(key, this, this._validate);
     }, this);
   }.on('init'),
-  pushDependentValidaionKeyToModel: function() {
+  pushDependentValidationKeyToModel: function() {
     var model = this.get('model');
     if (model._dependentValidationKeys[this.property] === undefined) {
       model._dependentValidationKeys[this.property] = Ember.makeArray();
@@ -555,7 +487,13 @@ Ember.Validations.validators.local.Length = Ember.Validations.validators.Base.ex
       }
     }
 
-    this.tokenizedLength = new Function('value', 'return (value || "").' + (this.options.tokenizer || 'split("")') + '.length');
+    this.options.tokenizer = this.options.tokenizer || function(value) { return value.split(''); };
+    // if (typeof(this.options.tokenizer) === 'function') {
+      // debugger;
+      // // this.tokenizedLength = new Function('value', 'return '
+    // } else {
+      // this.tokenizedLength = new Function('value', 'return (value || "").' + (this.options.tokenizer || 'split("")') + '.length');
+    // }
   },
   CHECKS: {
     'is'      : '==',
@@ -575,10 +513,10 @@ Ember.Validations.validators.local.Length = Ember.Validations.validators.Base.ex
     }
   },
   messageKeys: function() {
-    return Object.keys(this.MESSAGES);
+    return Ember.keys(this.MESSAGES);
   },
   checkKeys: function() {
-    return Object.keys(this.CHECKS);
+    return Ember.keys(this.CHECKS);
   },
   renderMessageFor: function(key) {
     var options = {count: this.getValue(key)}, _key;
@@ -609,7 +547,7 @@ Ember.Validations.validators.local.Length = Ember.Validations.validators.Base.ex
           continue;
         }
 
-        fn = new Function('return ' + this.tokenizedLength(this.model.get(this.property)) + ' ' + operator + ' ' + this.getValue(key));
+        fn = new Function('return ' + this.options.tokenizer(this.model.get(this.property)).length + ' ' + operator + ' ' + this.getValue(key));
         if (!fn()) {
           this.errors.pushObject(this.renderMessageFor(key));
         }
@@ -637,7 +575,8 @@ Ember.Validations.validators.local.Numericality = Ember.Validations.validators.B
       this.options[key] = true;
     }
 
-    if (this.options.messages === undefined) {
+    if (this.options.messages === undefined || this.options.messages.numericality === undefined) {
+      this.options.messages = this.options.messages || {};
       this.options.messages = { numericality: Ember.Validations.messages.render('notANumber', this.options) };
     }
 
@@ -645,17 +584,18 @@ Ember.Validations.validators.local.Numericality = Ember.Validations.validators.B
       this.options.messages.onlyInteger = Ember.Validations.messages.render('notAnInteger', this.options);
     }
 
-    keys = Object.keys(this.CHECKS).concat(['odd', 'even']);
+    keys = Ember.keys(this.CHECKS).concat(['odd', 'even']);
     for(index = 0; index < keys.length; index++) {
       key = keys[index];
 
-      if (isNaN(this.options[key])) {
-        this.model.addObserver(this.options[key], this, this._validate);
+      var prop = this.options[key];
+      if (key in this.options && isNaN(prop)) {
+        this.model.addObserver(prop, this, this._validate);
       }
 
-      if (this.options[key] !== undefined && this.options.messages[key] === undefined) {
-        if (Ember.$.inArray(key, Object.keys(this.CHECKS)) !== -1) {
-          this.options.count = this.options[key];
+      if (prop !== undefined && this.options.messages[key] === undefined) {
+        if (Ember.$.inArray(key, Ember.keys(this.CHECKS)) !== -1) {
+          this.options.count = prop;
         }
         this.options.messages[key] = Ember.Validations.messages.render(key, this.options);
         if (this.options.count !== undefined) {
@@ -728,7 +668,7 @@ Ember.Validations.validators.local.Presence = Ember.Validations.validators.Base.
     }
   },
   call: function() {
-    if (Ember.isEmpty(this.model.get(this.property))) {
+    if (Ember.isBlank(this.model.get(this.property))) {
       this.errors.pushObject(this.options.message);
     }
   }
@@ -739,26 +679,89 @@ Ember.Validations.validators.local.Presence = Ember.Validations.validators.Base.
 
 
 (function() {
+Ember.Validations.validators.local.Url = Ember.Validations.validators.Base.extend({
+  regexp: null,
+  regexp_ip: null,
 
-})();
+  init: function() {
+    this._super();
 
-
-
-(function() {
-Ember.ControllerMixin.reopen({
-  childControllers: Ember.A(),
-  setupAsChildController: function() {
-    if (this.parentController) {
-      this.parentController.childControllers.pushObject(this);
-      this.reopen({
-        willDestroy: function() {
-          this._super();
-          this.parentController.childControllers.removeObject(this);
-        }
-      });
+    if (this.get('options.message') === undefined) {
+      this.set('options.message', Ember.Validations.messages.render('url', this.options));
     }
-  }.on('init')
+
+    if (this.get('options.protocols') === undefined) {
+      this.set('options.protocols', ['http', 'https']);
+    }
+
+    // Regular Expression Parts
+    var dec_octet = '(25[0-5]|2[0-4][0-9]|[0-1][0-9][0-9]|[1-9][0-9]|[0-9])'; // 0-255
+    var ipaddress = '(' + dec_octet + '(\\.' + dec_octet + '){3})';
+    var hostname = '([a-zA-Z0-9\\-]+\\.)+([a-zA-Z]{2,})';
+    var encoded = '%[0-9a-fA-F]{2}';
+    var characters = 'a-zA-Z0-9$\\-_.+!*\'(),;:@&=';
+    var segment = '([' + characters + ']|' + encoded + ')*';
+
+    // Build Regular Expression
+    var regex_str = '^';
+
+    if (this.get('options.domainOnly') === true) {
+      regex_str += hostname;
+    } else {
+      regex_str += '(' + this.get('options.protocols').join('|') + '):\\/\\/'; // Protocol
+
+      // Username and password
+      if (this.get('options.allowUserPass') === true) {
+        regex_str += '(([a-zA-Z0-9$\\-_.+!*\'(),;:&=]|' + encoded + ')+@)?'; // Username & passwords
+      }
+
+      // IP Addresses?
+      if (this.get('options.allowIp') === true) {
+        regex_str += '(' + hostname + '|' + ipaddress + ')'; // Hostname OR IP
+      } else {
+        regex_str += '(' + hostname + ')'; // Hostname only
+      }
+
+      // Ports
+      if (this.get('options.allowPort') === true) {
+        regex_str += '(:[0-9]+)?'; // Port
+      }
+
+      regex_str += '(\\/';
+      regex_str += '(' + segment + '(\\/' + segment + ')*)?'; // Path
+      regex_str += '(\\?' + '([' + characters + '/?]|' + encoded + ')*)?'; // Query
+      regex_str += '(\\#' + '([' + characters + '/?]|' + encoded + ')*)?'; // Anchor
+      regex_str += ')?';
+    }
+
+    regex_str += '$';
+
+    // RegExp
+    this.regexp = new RegExp(regex_str);
+    this.regexp_ip = new RegExp(ipaddress);
+  },
+  call: function() {
+    var url = this.model.get(this.property);
+
+    if (Ember.isEmpty(url)) {
+      if (this.get('options.allowBlank') !== true) {
+        this.errors.pushObject(this.get('options.message'));
+      }
+    } else {
+      if (this.get('options.allowIp') !== true) {
+        if (this.regexp_ip.test(url)) {
+          this.errors.pushObject(this.get('options.message'));
+          return;
+        }
+      }
+
+      if (!this.regexp.test(url)) {
+        this.errors.pushObject(this.get('options.message'));
+      }
+    }
+  }
 });
+
 
 })();
 
